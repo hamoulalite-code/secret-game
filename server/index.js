@@ -24,7 +24,7 @@ function createRoom(id, name) {
     phase: "avatar",
     players: new Map(),
     secrets: [],
-    votes: new Map()
+    votes: new Map(),
   };
 }
 
@@ -40,14 +40,14 @@ function publicState(room) {
   const players = Array.from(room.players.values()).map((p) => ({
     id: p.id,
     avatarId: p.avatarId || null,
-    submitted: !!p.submitted
+    submitted: !!p.submitted,
   }));
 
-  const takenAvatars = players.filter(p => p.avatarId).map(p => p.avatarId);
+  const takenAvatars = players.filter((p) => p.avatarId).map((p) => p.avatarId);
 
   const secrets = room.secrets.map((s) => ({
     secretId: s.secretId,
-    text: s.text
+    text: s.text,
   }));
 
   return {
@@ -56,13 +56,14 @@ function publicState(room) {
     phase: room.phase,
     players,
     takenAvatars,
-    secrets
+    secrets,
   };
 }
 
 function broadcastRoom(roomId) {
   const room = rooms[roomId];
   if (!room) return;
+
   io.to(roomId).emit("room:state", publicState(room));
   io.emit("rooms:list", roomsList());
 }
@@ -72,42 +73,16 @@ function allSecretsSubmitted(room) {
   return Array.from(room.players.values()).every((p) => p.submitted);
 }
 
-function computeResults(room) {
-  return room.secrets.map((s) => {
-    const counts = new Map();
-
-    for (const [, perVoter] of room.votes.entries()) {
-      const guess = perVoter.get(s.secretId);
-      if (!guess) continue;
-      counts.set(guess, (counts.get(guess) || 0) + 1);
-    }
-
-    const votes = Array.from(counts.entries())
-      .map(([guessedSocketId, count]) => {
-        const pl = room.players.get(guessedSocketId);
-        return {
-          guessedSocketId,
-          avatarId: pl?.avatarId || null,
-          count
-        };
-      })
-      .sort((a, b) => b.count - a.count);
-
-    return {
-      secretId: s.secretId,
-      secretText: s.text,
-      ownerSocketId: s.ownerSocketId,
-      ownerAvatarId: s.ownerAvatarId,
-      votes
-    };
-  });
-}
-
 // ------------------ Socket.io ------------------
 
 io.on("connection", (socket) => {
-
+  // ✅ Compatible: ton lobby écoute "rooms:list"
   socket.on("rooms:list", () => {
+    socket.emit("rooms:list", roomsList());
+  });
+
+  // ✅ Compatible: ton lobby envoie parfois "rooms:get"
+  socket.on("rooms:get", () => {
     socket.emit("rooms:list", roomsList());
   });
 
@@ -130,7 +105,7 @@ io.on("connection", (socket) => {
       id: socket.id,
       avatarId: null,
       secret: "",
-      submitted: false
+      submitted: false,
     });
 
     room.votes.set(socket.id, new Map());
@@ -182,15 +157,10 @@ io.on("connection", (socket) => {
       secretId: "s_" + Math.random().toString(36).slice(2, 9),
       text,
       ownerSocketId: socket.id,
-      ownerAvatarId: player.avatarId
+      ownerAvatarId: player.avatarId,
     });
 
-    if (allSecretsSubmitted(room)) {
-      room.phase = "vote";
-    } else {
-      room.phase = "secrets";
-    }
-
+    room.phase = allSecretsSubmitted(room) ? "vote" : "secrets";
     broadcastRoom(roomId);
   });
 
@@ -208,7 +178,6 @@ io.on("connection", (socket) => {
 });
 
 // ================== START SERVER ==================
-
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
 });
