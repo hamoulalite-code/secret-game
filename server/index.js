@@ -27,7 +27,7 @@ function createRoom(id, name, requiredPlayers = 2) {
     requiredPlayers: clamp(requiredPlayers, 1, 20),
     phase: "waiting", // waiting -> avatar -> secrets -> vote -> results
     players: new Map(), // socketId -> {id,name,avatarId,submitted}
-    secrets: [],
+    secrets: [], // {secretId,text,ownerSocketId,ownerAvatarId}
     votes: new Map(), // voterSocketId -> Map(secretId -> guessedSocketId)
     scores: new Map(), // socketId -> number
   };
@@ -58,7 +58,7 @@ function publicState(room) {
   const secrets = room.secrets.map((s) => ({
     secretId: s.secretId,
     text: s.text,
-    ownerSocketId: s.ownerSocketId, // juste pour éviter vote sur soi-même
+    ownerSocketId: s.ownerSocketId, // pour ne pas voter sur soi-même côté client
   }));
 
   return {
@@ -71,13 +71,6 @@ function publicState(room) {
     takenAvatars,
     secrets,
   };
-}
-
-function broadcastRoom(roomId) {
-  const room = rooms[roomId];
-  if (!room) return;
-  io.to(roomId).emit("room:state", publicState(room));
-  io.emit("rooms:list", roomsList());
 }
 
 function allHaveAvatar(room) {
@@ -108,11 +101,13 @@ function allVotesSubmitted(room) {
 }
 
 function computeScores(room) {
+  // reset
   for (const pid of room.players.keys()) room.scores.set(pid, 0);
 
+  // +1 point par bonne réponse
   for (const [voterId, perVoter] of room.votes.entries()) {
     for (const s of room.secrets) {
-      if (s.ownerSocketId === voterId) continue;
+      if (s.ownerSocketId === voterId) continue; // pas de vote sur soi-même
       const guess = perVoter.get(s.secretId);
       if (!guess) continue;
       if (guess === s.ownerSocketId) {
@@ -122,7 +117,54 @@ function computeScores(room) {
   }
 }
 
-// API (optionnelle) - utile si tu veux fetch aussi
+/**
+ * ✅ IMPORTANT : force la phase correcte à chaque update
+ * - si pas assez de joueurs => waiting
+ * - sinon waiting => avatar
+ * - avatar => secrets quand tous ont avatar
+ * - secrets => vote quand tous ont submit
+ * - vote => results quand tous ont voté (et calcule scores)
+ */
+function enforcePhase(room) {
+  if (room.players.size < room.requiredPlayers) {
+    room.phase = "waiting";
+    return;
+  }
+
+  if (room.phase === "waiting") {
+    room.phase = "avatar";
+    return;
+  }
+
+  if (room.phase === "avatar" && allHaveAvatar(room)) {
+    room.phase = "secrets";
+    return;
+  }
+
+  if (room.phase === "secrets" && allSecretsSubmitted(room)) {
+    room.phase = "vote";
+    return;
+  }
+
+  if (room.phase === "vote" && allVotesSubmitted(room)) {
+    computeScores(room);
+    room.phase = "results";
+    return;
+  }
+}
+
+function broadcastRoom(roomId) {
+  const room = rooms[roomId];
+  if (!room) return;
+
+  // ✅ force toujours la phase
+  enforcePhase(room);
+
+  io.to(roomId).emit("room:state", publicState(room));
+  io.emit("rooms:list", roomsList());
+}
+
+// API optionnelle
 app.get("/api/rooms", (req, res) => {
   res.json(roomsList());
 });
@@ -133,7 +175,7 @@ io.on("connection", (socket) => {
   socket.on("rooms:get", () => socket.emit("rooms:list", roomsList()));
   socket.on("rooms:list", () => socket.emit("rooms:list", roomsList()));
 
-  // ✅ Create room with players number
+  // Create room with players number
   socket.on("rooms:create", ({ name, requiredPlayers }) => {
     const id = "room-" + Math.random().toString(36).slice(2, 8);
     createRoom(id, (name || "Nouveau serveur").trim(), requiredPlayers);
@@ -141,7 +183,7 @@ io.on("connection", (socket) => {
     socket.emit("rooms:created", { roomId: id });
   });
 
-  // ✅ Join room with player name
+  // Join room with player name
   socket.on("room:join", ({ roomId, name }) => {
     const room = rooms[roomId];
     if (!room) {
@@ -161,11 +203,6 @@ io.on("connection", (socket) => {
     if (!room.votes.has(socket.id)) room.votes.set(socket.id, new Map());
     if (!room.scores.has(socket.id)) room.scores.set(socket.id, 0);
 
-    // ✅ phase waiting tant que pas assez de joueurs
-    if (room.phase === "waiting" && room.players.size >= room.requiredPlayers) {
-      room.phase = "avatar";
-    }
-
     socket.emit("room:joined", { roomId, roomName: room.name });
     broadcastRoom(roomId);
   });
@@ -174,15 +211,20 @@ io.on("connection", (socket) => {
     const room = rooms[roomId];
     if (!room) return;
 
-    // blocage si pas assez de joueurs
+    // 🔒 tant que pas assez
     if (room.players.size < room.requiredPlayers) {
-      socket.emit("error:msg", `Attends les joueurs (${room.players.size}/${room.requiredPlayers})`);
-      room.phase = "waiting";
+      socket.emit("error:msg", `⏳ Attends les joueurs (${room.players.size}/${room.requiredPlayers})`);
       broadcastRoom(roomId);
       return;
     }
 
-    if (room.phase !== "avatar") return;
+    // doit être en avatar (enforcePhase s’en occupe aussi)
+    enforcePhase(room);
+    if (room.phase !== "avatar") {
+      socket.emit("error:msg", "Pas le moment de choisir un avatar.");
+      broadcastRoom(roomId);
+      return;
+    }
 
     const player = room.players.get(socket.id);
     if (!player) return;
@@ -197,7 +239,6 @@ io.on("connection", (socket) => {
 
     player.avatarId = avatarId;
 
-    if (allHaveAvatar(room)) room.phase = "secrets";
     broadcastRoom(roomId);
   });
 
@@ -205,8 +246,17 @@ io.on("connection", (socket) => {
     const room = rooms[roomId];
     if (!room) return;
 
+    // 🔒 tant que pas assez
+    if (room.players.size < room.requiredPlayers) {
+      socket.emit("error:msg", `⏳ Attends les joueurs (${room.players.size}/${room.requiredPlayers})`);
+      broadcastRoom(roomId);
+      return;
+    }
+
+    enforcePhase(room);
     if (room.phase !== "secrets") {
       socket.emit("error:msg", "Ce n'est pas le moment d'écrire.");
+      broadcastRoom(roomId);
       return;
     }
 
@@ -238,8 +288,6 @@ io.on("connection", (socket) => {
       ownerAvatarId: player.avatarId,
     });
 
-    if (allSecretsSubmitted(room)) room.phase = "vote";
-
     socket.emit("secret:ok");
     broadcastRoom(roomId);
   });
@@ -248,8 +296,17 @@ io.on("connection", (socket) => {
     const room = rooms[roomId];
     if (!room) return;
 
+    // 🔒 tant que pas assez
+    if (room.players.size < room.requiredPlayers) {
+      socket.emit("error:msg", `⏳ Attends les joueurs (${room.players.size}/${room.requiredPlayers})`);
+      broadcastRoom(roomId);
+      return;
+    }
+
+    enforcePhase(room);
     if (room.phase !== "vote") {
       socket.emit("error:msg", "Le vote n'est pas actif.");
+      broadcastRoom(roomId);
       return;
     }
 
@@ -272,11 +329,6 @@ io.on("connection", (socket) => {
 
     socket.emit("vote:ok");
 
-    if (allVotesSubmitted(room)) {
-      computeScores(room);
-      room.phase = "results";
-    }
-
     broadcastRoom(roomId);
   });
 
@@ -290,8 +342,8 @@ io.on("connection", (socket) => {
       room.scores.delete(socket.id);
       room.secrets = room.secrets.filter((s) => s.ownerSocketId !== socket.id);
 
-      // si on retombe sous requiredPlayers -> waiting
-      if (room.players.size < room.requiredPlayers) room.phase = "waiting";
+      // ✅ si plus assez -> waiting
+      enforcePhase(room);
 
       broadcastRoom(roomId);
     }
