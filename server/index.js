@@ -9,9 +9,11 @@ const io = new Server(server);
 
 const PORT = process.env.PORT || 3001;
 
+// Servir les fichiers du dossier public
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 // ------------------ Données en mémoire ------------------
+
 const rooms = {};
 createRoom("room-1", "Serveur #1");
 
@@ -19,10 +21,10 @@ function createRoom(id, name) {
   rooms[id] = {
     id,
     name,
-    phase: "avatar", // avatar -> secrets -> vote -> results
-    players: new Map(), // socketId -> { id, avatarId, secret, submitted }
-    secrets: [], // { secretId, text, ownerSocketId, ownerAvatarId }
-    votes: new Map() // voterSocketId -> Map(secretId -> guessedSocketId)
+    phase: "avatar",
+    players: new Map(),
+    secrets: [],
+    votes: new Map()
   };
 }
 
@@ -71,9 +73,8 @@ function allSecretsSubmitted(room) {
 }
 
 function computeResults(room) {
-  // Pour chaque secret, compter votes par joueur (avatar)
   return room.secrets.map((s) => {
-    const counts = new Map(); // guessedSocketId -> count
+    const counts = new Map();
 
     for (const [, perVoter] of room.votes.entries()) {
       const guess = perVoter.get(s.secretId);
@@ -103,7 +104,9 @@ function computeResults(room) {
 }
 
 // ------------------ Socket.io ------------------
+
 io.on("connection", (socket) => {
+
   socket.on("rooms:list", () => {
     socket.emit("rooms:list", roomsList());
   });
@@ -121,16 +124,6 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // quitter une autre salle si besoin
-    for (const rId of Object.keys(rooms)) {
-      if (rooms[rId].players.has(socket.id)) {
-        socket.leave(rId);
-        rooms[rId].players.delete(socket.id);
-        rooms[rId].votes.delete(socket.id);
-        broadcastRoom(rId);
-      }
-    }
-
     socket.join(roomId);
 
     room.players.set(socket.id, {
@@ -139,6 +132,7 @@ io.on("connection", (socket) => {
       secret: "",
       submitted: false
     });
+
     room.votes.set(socket.id, new Map());
 
     socket.emit("room:joined", { roomId, roomName: room.name });
@@ -152,7 +146,6 @@ io.on("connection", (socket) => {
     const player = room.players.get(socket.id);
     if (!player) return;
 
-    // avatar déjà pris ?
     for (const [, p] of room.players.entries()) {
       if (p.avatarId === avatarId && p.id !== socket.id) {
         socket.emit("error:msg", "Avatar déjà pris.");
@@ -185,21 +178,13 @@ io.on("connection", (socket) => {
     player.secret = text;
     player.submitted = true;
 
-    // mettre/mettre à jour le secret dans la liste
-    const existing = room.secrets.find((s) => s.ownerSocketId === socket.id);
-    if (existing) {
-      existing.text = text;
-      existing.ownerAvatarId = player.avatarId;
-    } else {
-      room.secrets.push({
-        secretId: "s_" + Math.random().toString(36).slice(2, 9),
-        text,
-        ownerSocketId: socket.id,
-        ownerAvatarId: player.avatarId
-      });
-    }
+    room.secrets.push({
+      secretId: "s_" + Math.random().toString(36).slice(2, 9),
+      text,
+      ownerSocketId: socket.id,
+      ownerAvatarId: player.avatarId
+    });
 
-    // Auto: si tout le monde a envoyé -> phase vote
     if (allSecretsSubmitted(room)) {
       room.phase = "vote";
     } else {
@@ -209,78 +194,21 @@ io.on("connection", (socket) => {
     broadcastRoom(roomId);
   });
 
-  socket.on("vote:cast", ({ roomId, secretId, guessedSocketId }) => {
-    const room = rooms[roomId];
-    if (!room) return;
-
-    if (room.phase !== "vote") return;
-
-    const voter = room.players.get(socket.id);
-    if (!voter) return;
-
-    // on empêche de voter si pas d'avatar
-    if (!voter.avatarId) return;
-
-    // secret existe ?
-    const secret = room.secrets.find((s) => s.secretId === secretId);
-    if (!secret) return;
-
-    // guessed existe ?
-    if (!room.players.has(guessedSocketId)) return;
-
-    const perVoter = room.votes.get(socket.id);
-    if (!perVoter) return;
-
-    perVoter.set(secretId, guessedSocketId);
-
-    // On renvoie juste au voter une confirmation (option)
-    socket.emit("vote:ok", { secretId, guessedSocketId });
-  });
-
-  socket.on("phase:set", ({ roomId, phase }) => {
-    // Simple : tout le monde peut changer (si tu veux, après on met host)
-    const room = rooms[roomId];
-    if (!room) return;
-    if (!["avatar", "secrets", "vote", "results"].includes(phase)) return;
-
-    room.phase = phase;
-
-    if (phase === "results") {
-      io.to(roomId).emit("results:data", computeResults(room));
-    }
-
-    broadcastRoom(roomId);
-  });
-
-  socket.on("results:get", ({ roomId }) => {
-    const room = rooms[roomId];
-    if (!room) return;
-    socket.emit("results:data", computeResults(room));
-  });
-
   socket.on("disconnect", () => {
     for (const roomId of Object.keys(rooms)) {
       const room = rooms[roomId];
       if (room.players.has(socket.id)) {
         room.players.delete(socket.id);
         room.votes.delete(socket.id);
-
-        // enlever son secret aussi
         room.secrets = room.secrets.filter((s) => s.ownerSocketId !== socket.id);
-
-        // enlever les votes qui pointaient vers lui
-        for (const [, perVoter] of room.votes.entries()) {
-          for (const [secretId, guessId] of perVoter.entries()) {
-            if (guessId === socket.id) perVoter.delete(secretId);
-          }
-        }
-
         broadcastRoom(roomId);
       }
     }
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+// ================== START SERVER ==================
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on port ${PORT}`);
 });
