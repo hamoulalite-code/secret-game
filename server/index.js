@@ -8,45 +8,46 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 const PORT = process.env.PORT || 3001;
-
-// Servir le dossier public
 app.use(express.static(path.join(__dirname, "..", "public")));
 
-// ------------------ Données en mémoire ------------------
-
+// ------------------ Rooms en mémoire ------------------
 const rooms = {};
-createRoom("room-1", "Serveur #1");
+createRoom("room-1", "Serveur #1", 2);
 
-function createRoom(id, name) {
+function clamp(n, min, max) {
+  n = Number(n);
+  if (!Number.isFinite(n)) n = min;
+  return Math.max(min, Math.min(max, n));
+}
+
+function createRoom(id, name, requiredPlayers = 2) {
   rooms[id] = {
     id,
-    name,
-    phase: "avatar", // avatar -> secrets -> vote -> results
-    players: new Map(), // socketId -> {id, avatarId, submitted}
-    secrets: [], // [{secretId,text,ownerSocketId,ownerAvatarId}]
+    name: (name || id).trim(),
+    requiredPlayers: clamp(requiredPlayers, 1, 20),
+    phase: "waiting", // waiting -> avatar -> secrets -> vote -> results
+    players: new Map(), // socketId -> {id,name,avatarId,submitted}
+    secrets: [],
     votes: new Map(), // voterSocketId -> Map(secretId -> guessedSocketId)
     scores: new Map(), // socketId -> number
   };
 }
 
 function roomsList() {
-  return Object.values(rooms).map((r) => {
-    const playersCount = r.players.size;
-    const submitted = Array.from(r.players.values()).filter((p) => p.submitted).length;
-    return {
-      id: r.id,
-      name: r.name,
-      playersCount,
-      capacity: 10,
-      submitted,
-      phase: r.phase,
-    };
-  });
+  return Object.values(rooms).map((r) => ({
+    id: r.id,
+    name: r.name,
+    playersCount: r.players.size,
+    requiredPlayers: r.requiredPlayers,
+    capacity: r.requiredPlayers,
+    phase: r.phase,
+  }));
 }
 
 function publicState(room) {
   const players = Array.from(room.players.values()).map((p) => ({
     id: p.id,
+    name: p.name || "Joueur",
     avatarId: p.avatarId || null,
     submitted: !!p.submitted,
     score: Number(room.scores.get(p.id) || 0),
@@ -54,16 +55,17 @@ function publicState(room) {
 
   const takenAvatars = players.filter((p) => p.avatarId).map((p) => p.avatarId);
 
-  // On envoie ownerSocketId juste pour empêcher le vote sur son propre secret côté client
   const secrets = room.secrets.map((s) => ({
     secretId: s.secretId,
     text: s.text,
-    ownerSocketId: s.ownerSocketId,
+    ownerSocketId: s.ownerSocketId, // juste pour éviter vote sur soi-même
   }));
 
   return {
     roomId: room.id,
     roomName: room.name,
+    requiredPlayers: room.requiredPlayers,
+    playersCount: room.players.size,
     phase: room.phase,
     players,
     takenAvatars,
@@ -74,9 +76,8 @@ function publicState(room) {
 function broadcastRoom(roomId) {
   const room = rooms[roomId];
   if (!room) return;
-
   io.to(roomId).emit("room:state", publicState(room));
-  io.emit("rooms:list", roomsList()); // lobby temps réel
+  io.emit("rooms:list", roomsList());
 }
 
 function allHaveAvatar(room) {
@@ -90,7 +91,6 @@ function allSecretsSubmitted(room) {
 }
 
 function requiredVotesForVoter(room, voterId) {
-  // Tu votes pour tous les secrets sauf le tien
   return room.secrets.filter((s) => s.ownerSocketId !== voterId).length;
 }
 
@@ -108,10 +108,8 @@ function allVotesSubmitted(room) {
 }
 
 function computeScores(room) {
-  // reset
   for (const pid of room.players.keys()) room.scores.set(pid, 0);
 
-  // +1 point pour chaque vote correct (votant)
   for (const [voterId, perVoter] of room.votes.entries()) {
     for (const s of room.secrets) {
       if (s.ownerSocketId === voterId) continue;
@@ -124,20 +122,27 @@ function computeScores(room) {
   }
 }
 
+// API (optionnelle) - utile si tu veux fetch aussi
+app.get("/api/rooms", (req, res) => {
+  res.json(roomsList());
+});
+
 // ------------------ Socket.io ------------------
-
 io.on("connection", (socket) => {
-  // Lobby compat
-  socket.on("rooms:list", () => socket.emit("rooms:list", roomsList()));
+  // Lobby list
   socket.on("rooms:get", () => socket.emit("rooms:list", roomsList()));
+  socket.on("rooms:list", () => socket.emit("rooms:list", roomsList()));
 
-  socket.on("rooms:create", ({ name }) => {
+  // ✅ Create room with players number
+  socket.on("rooms:create", ({ name, requiredPlayers }) => {
     const id = "room-" + Math.random().toString(36).slice(2, 8);
-    createRoom(id, (name || "Nouveau serveur").trim());
+    createRoom(id, (name || "Nouveau serveur").trim(), requiredPlayers);
     io.emit("rooms:list", roomsList());
+    socket.emit("rooms:created", { roomId: id });
   });
 
-  socket.on("room:join", ({ roomId }) => {
+  // ✅ Join room with player name
+  socket.on("room:join", ({ roomId, name }) => {
     const room = rooms[roomId];
     if (!room) {
       socket.emit("error:msg", "Salle introuvable.");
@@ -148,12 +153,18 @@ io.on("connection", (socket) => {
 
     room.players.set(socket.id, {
       id: socket.id,
+      name: (name || "Joueur").toString().trim().slice(0, 20),
       avatarId: null,
       submitted: false,
     });
 
     if (!room.votes.has(socket.id)) room.votes.set(socket.id, new Map());
     if (!room.scores.has(socket.id)) room.scores.set(socket.id, 0);
+
+    // ✅ phase waiting tant que pas assez de joueurs
+    if (room.phase === "waiting" && room.players.size >= room.requiredPlayers) {
+      room.phase = "avatar";
+    }
 
     socket.emit("room:joined", { roomId, roomName: room.name });
     broadcastRoom(roomId);
@@ -162,6 +173,16 @@ io.on("connection", (socket) => {
   socket.on("avatar:pick", ({ roomId, avatarId }) => {
     const room = rooms[roomId];
     if (!room) return;
+
+    // blocage si pas assez de joueurs
+    if (room.players.size < room.requiredPlayers) {
+      socket.emit("error:msg", `Attends les joueurs (${room.players.size}/${room.requiredPlayers})`);
+      room.phase = "waiting";
+      broadcastRoom(roomId);
+      return;
+    }
+
+    if (room.phase !== "avatar") return;
 
     const player = room.players.get(socket.id);
     if (!player) return;
@@ -176,16 +197,18 @@ io.on("connection", (socket) => {
 
     player.avatarId = avatarId;
 
-    if (room.phase === "avatar" && allHaveAvatar(room)) {
-      room.phase = "secrets";
-    }
-
+    if (allHaveAvatar(room)) room.phase = "secrets";
     broadcastRoom(roomId);
   });
 
   socket.on("secret:submit", ({ roomId, secretText }) => {
     const room = rooms[roomId];
     if (!room) return;
+
+    if (room.phase !== "secrets") {
+      socket.emit("error:msg", "Ce n'est pas le moment d'écrire.");
+      return;
+    }
 
     const player = room.players.get(socket.id);
     if (!player) return;
@@ -195,21 +218,14 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // ✅ 1 seul secret
     if (player.submitted) {
       socket.emit("error:msg", "Secret déjà envoyé.");
       return;
     }
 
-    // ✅ seulement en phase secrets
-    if (room.phase !== "secrets") {
-      socket.emit("error:msg", "Tu ne peux pas envoyer de secret maintenant.");
-      return;
-    }
-
     const text = (secretText || "").trim();
     if (text.length < 3) {
-      socket.emit("error:msg", "Écris un secret (min 3 caractères).");
+      socket.emit("error:msg", "Secret min 3 caractères.");
       return;
     }
 
@@ -222,13 +238,7 @@ io.on("connection", (socket) => {
       ownerAvatarId: player.avatarId,
     });
 
-    // si tous ont soumis => vote
-    if (allSecretsSubmitted(room)) {
-      room.phase = "vote";
-      for (const pid of room.players.keys()) {
-        if (!room.votes.has(pid)) room.votes.set(pid, new Map());
-      }
-    }
+    if (allSecretsSubmitted(room)) room.phase = "vote";
 
     socket.emit("secret:ok");
     broadcastRoom(roomId);
@@ -243,15 +253,11 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const voter = room.players.get(socket.id);
-    if (!voter) return;
-
     const secret = room.secrets.find((s) => s.secretId === secretId);
     if (!secret) return;
 
-    // pas voter son propre secret
     if (secret.ownerSocketId === socket.id) {
-      socket.emit("error:msg", "Tu ne peux pas voter pour ton propre secret.");
+      socket.emit("error:msg", "Tu ne peux pas voter pour toi-même.");
       return;
     }
 
@@ -266,7 +272,6 @@ io.on("connection", (socket) => {
 
     socket.emit("vote:ok");
 
-    // fin auto
     if (allVotesSubmitted(room)) {
       computeScores(room);
       room.phase = "results";
@@ -278,27 +283,21 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     for (const roomId of Object.keys(rooms)) {
       const room = rooms[roomId];
-      if (room.players.has(socket.id)) {
-        room.players.delete(socket.id);
-        room.votes.delete(socket.id);
-        room.scores.delete(socket.id);
-        room.secrets = room.secrets.filter((s) => s.ownerSocketId !== socket.id);
+      if (!room.players.has(socket.id)) continue;
 
-        // si plus personne -> reset
-        if (room.players.size === 0) {
-          room.phase = "avatar";
-          room.secrets = [];
-          room.votes = new Map();
-          room.scores = new Map();
-        }
+      room.players.delete(socket.id);
+      room.votes.delete(socket.id);
+      room.scores.delete(socket.id);
+      room.secrets = room.secrets.filter((s) => s.ownerSocketId !== socket.id);
 
-        broadcastRoom(roomId);
-      }
+      // si on retombe sous requiredPlayers -> waiting
+      if (room.players.size < room.requiredPlayers) room.phase = "waiting";
+
+      broadcastRoom(roomId);
     }
   });
 });
 
-// ================== START SERVER ==================
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
 });

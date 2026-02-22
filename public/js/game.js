@@ -1,7 +1,18 @@
 const socket = io();
+
+// roomId + pseudo depuis l'URL
 const qs = new URLSearchParams(location.search);
 const roomId = qs.get("roomId") || qs.get("room");
+let myName = (qs.get("name") || "").trim();
 
+// petit fallback (si tu arrives depuis un lien sans name)
+if (!myName) {
+  myName = (localStorage.getItem("sg_name") || "").trim();
+}
+if (!myName) myName = "Joueur";
+localStorage.setItem("sg_name", myName);
+
+// DOM
 const roomTitle = document.getElementById("roomTitle");
 const phaseText = document.getElementById("phaseText");
 
@@ -27,18 +38,20 @@ const closeModalBtn = document.getElementById("closeModalBtn");
 const cancelVoteBtn = document.getElementById("cancelVoteBtn");
 const modalTitle = document.getElementById("modalTitle");
 
+// state
 let state = null;
 let myAvatarId = null;
 let mySubmitted = false;
 let selectedSecretIdForVote = null;
 
-// 12 avatars
+// 12 avatars (images)
 const AVATARS = Array.from({ length: 12 }, (_, i) => {
   const id = `a${i + 1}`;
-  return { id, src: `/assets/avatars/${id}.png`, label: `Avatar ${i + 1}` };
+  return { id, src: `/assets/avatars/${id}.png` };
 });
 
 function phaseLabel(p) {
+  if (p === "waiting") return "Attente des joueurs";
   if (p === "avatar") return "Choix avatars";
   if (p === "secrets") return "Écriture des secrets";
   if (p === "vote") return "Vote";
@@ -47,7 +60,7 @@ function phaseLabel(p) {
 }
 
 function escapeHtml(str) {
-  return (str || "").replace(/[&<>"']/g, (m) => ({
+  return (str || "").toString().replace(/[&<>"']/g, (m) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
   })[m]);
 }
@@ -65,90 +78,52 @@ function hideSecretComposer(hidden) {
   if (sendSecretBtn) sendSecretBtn.style.display = hidden ? "none" : "";
 }
 
-function renderAvatarGrid(container, takenAvatars, onPick) {
+/**
+ * ✅ AVATAR GRID PRO
+ * - affiche le nom du joueur sous l’avatar si pris
+ * - montre “Libre” si libre
+ * - clique seulement si libre (ou ton propre)
+ */
+function renderAvatarGrid(container, players, takenAvatars, onPick) {
   if (!container) return;
   container.innerHTML = "";
 
-  AVATARS.forEach((a) => {
-    const taken = (takenAvatars || []).includes(a.id) && a.id !== myAvatarId;
+  // mapping avatarId -> playerName
+  const takenMap = new Map();
+  (players || []).forEach(p => {
+    if (p.avatarId) takenMap.set(p.avatarId, p.name || "Joueur");
+  });
+
+  AVATARS.forEach((a, idx) => {
+    const takenBy = takenMap.get(a.id) || null;
+    const taken = !!takenBy && a.id !== myAvatarId;
+
     const card = document.createElement("div");
     card.className = "avatar-card" + (taken ? " taken" : "") + (a.id === myAvatarId ? " selected" : "");
+
     card.innerHTML = `
-      <img class="avatar-img" src="${a.src}" alt="${escapeHtml(a.label)}" />
-      <div class="small">${escapeHtml(a.label)}</div>
+      <img class="avatar-img" src="${a.src}" alt="Avatar ${idx + 1}" />
+      <div class="small" style="font-weight:800;">
+        ${takenBy ? escapeHtml(takenBy) : "Libre"}
+      </div>
       ${taken ? `<div class="badge">Pris</div>` : ``}
     `;
-    if (!taken) card.addEventListener("click", () => onPick(a.id));
+
+    if (!taken) {
+      card.addEventListener("click", () => onPick(a.id));
+    }
+
     container.appendChild(card);
   });
 }
 
-function renderSecrets(secrets) {
-  if (!secretGrid) return;
-  secretGrid.innerHTML = "";
-
-  (secrets || []).forEach((s) => {
-    // on ne vote pas sur son propre secret
-    if (s.ownerSocketId === socket.id) return;
-
-    const card = document.createElement("div");
-    card.className = "secret-card";
-    card.innerHTML = `<div>${escapeHtml(s.text)}</div>`;
-    card.addEventListener("click", () => openVoteModal(s.secretId));
-    secretGrid.appendChild(card);
-  });
-}
-
-function openVoteModal(secretId) {
-  if (!state || state.phase !== "vote") {
-    if (msg) msg.textContent = "Le vote n'est pas encore actif.";
-    return;
-  }
-  selectedSecretIdForVote = secretId;
-  if (modalTitle) modalTitle.textContent = "Choisis l’avatar correspondant";
-  renderVoteAvatars();
-  if (modal) modal.classList.add("open");
-}
-
-function closeVoteModal() {
-  selectedSecretIdForVote = null;
-  if (modal) modal.classList.remove("open");
-}
-
-function renderVoteAvatars() {
-  if (!voteAvatarGrid) return;
-  voteAvatarGrid.innerHTML = "";
-
-  const players = (state?.players || []).filter((p) => p.avatarId);
-
-  players.forEach((p) => {
-    const avatar = AVATARS.find((a) => a.id === p.avatarId);
-    if (!avatar) return;
-
-    const card = document.createElement("div");
-    card.className = "avatar-card";
-    card.innerHTML = `
-      <img class="avatar-img" src="${avatar.src}" alt="${escapeHtml(avatar.label)}" />
-      <div class="small">${escapeHtml(avatar.label)}</div>
-    `;
-
-    card.addEventListener("click", () => {
-      socket.emit("vote:cast", {
-        roomId,
-        secretId: selectedSecretIdForVote,
-        guessedSocketId: p.id,
-      });
-      closeVoteModal();
-      if (msg) msg.textContent = "Vote enregistré ✅";
-    });
-
-    voteAvatarGrid.appendChild(card);
-  });
-}
-
-// ✅ SCOREBOARD PRO (en haut)
+/**
+ * ✅ SCOREBOARD PRO
+ * - affiche nom + avatar + points
+ */
 function renderScoreBar(players) {
   if (!scoreBar) return;
+
   const list = (players || [])
     .filter(p => p.avatarId)
     .map(p => ({ ...p, score: Number(p.score || 0) }))
@@ -167,7 +142,7 @@ function renderScoreBar(players) {
     el.className = "score-pill" + (p.id === socket.id ? " me" : "");
     el.innerHTML = `
       <img class="score-avatar" src="${av ? av.src : ""}" alt="" />
-      <div class="score-name">${escapeHtml(av ? av.label : "Joueur")}</div>
+      <div class="score-name">${escapeHtml(p.name || "Joueur")}</div>
       <div class="score-points">${p.score}</div>
     `;
     scoreBar.appendChild(el);
@@ -179,9 +154,83 @@ function renderScoreBar(players) {
   }
 }
 
+/**
+ * ✅ SECRETS (vote)
+ * - on ne montre pas ton propre secret
+ */
+function renderSecrets(secrets) {
+  if (!secretGrid) return;
+  secretGrid.innerHTML = "";
+
+  (secrets || []).forEach((s) => {
+    if (s.ownerSocketId === socket.id) return;
+
+    const card = document.createElement("div");
+    card.className = "secret-card";
+    card.innerHTML = `<div>${escapeHtml(s.text)}</div>`;
+    card.addEventListener("click", () => openVoteModal(s.secretId));
+    secretGrid.appendChild(card);
+  });
+}
+
+function openVoteModal(secretId) {
+  if (!state || state.phase !== "vote") {
+    if (msg) msg.textContent = "Le vote n'est pas encore actif.";
+    return;
+  }
+  selectedSecretIdForVote = secretId;
+  if (modalTitle) modalTitle.textContent = "Choisis le joueur correspondant";
+  renderVoteAvatars();
+  if (modal) modal.classList.add("open");
+}
+
+function closeVoteModal() {
+  selectedSecretIdForVote = null;
+  if (modal) modal.classList.remove("open");
+}
+
+/**
+ * ✅ MODAL VOTE PRO
+ * - affiche avatar + NOM du joueur
+ */
+function renderVoteAvatars() {
+  if (!voteAvatarGrid) return;
+  voteAvatarGrid.innerHTML = "";
+
+  const players = (state?.players || []).filter(p => p.avatarId);
+
+  players.forEach((p) => {
+    const avatar = AVATARS.find(a => a.id === p.avatarId);
+    if (!avatar) return;
+
+    const card = document.createElement("div");
+    card.className = "avatar-card";
+    card.innerHTML = `
+      <img class="avatar-img" src="${avatar.src}" alt="" />
+      <div class="small" style="font-weight:800;">${escapeHtml(p.name || "Joueur")}</div>
+    `;
+
+    card.addEventListener("click", () => {
+      socket.emit("vote:cast", {
+        roomId,
+        secretId: selectedSecretIdForVote,
+        guessedSocketId: p.id,
+      });
+      closeVoteModal();
+      if (msg) msg.textContent = "Vote enregistré ✅";
+    });
+
+    voteAvatarGrid.appendChild(card);
+  });
+}
+
+/**
+ * ✅ RESULTS = classement final (noms)
+ */
 function renderResults(players) {
   if (!resultsList) return;
   resultsList.innerHTML = "";
+
   const sorted = (players || [])
     .filter(p => p.avatarId)
     .map(p => ({ ...p, score: Number(p.score || 0) }))
@@ -195,7 +244,7 @@ function renderResults(players) {
       <div style="display:flex;align-items:center;gap:10px;">
         <div class="badge">#${idx + 1}</div>
         <img class="avatar-img" src="${av ? av.src : ""}" style="width:44px;height:44px;border-radius:12px;" />
-        <div style="font-weight:800;">${escapeHtml(av ? av.label : "Joueur")}</div>
+        <div style="font-weight:900;">${escapeHtml(p.name || "Joueur")}</div>
         <div style="margin-left:auto" class="badge">${p.score} point(s)</div>
       </div>
     `;
@@ -211,7 +260,6 @@ if (sendSecretBtn) {
     socket.emit("secret:submit", { roomId, secretText: secretInput.value });
   });
 }
-
 if (closeModalBtn) closeModalBtn.addEventListener("click", closeVoteModal);
 if (cancelVoteBtn) cancelVoteBtn.addEventListener("click", closeVoteModal);
 
@@ -221,7 +269,9 @@ socket.on("connect", () => {
     location.href = "./lobby.html";
     return;
   }
-  socket.emit("room:join", { roomId });
+
+  // ✅ IMPORTANT : on envoie le pseudo au serveur
+  socket.emit("room:join", { roomId, name: myName });
 });
 
 socket.on("room:joined", ({ roomName }) => {
@@ -235,37 +285,47 @@ socket.on("secret:ok", () => {
   if (msg) msg.textContent = "Secret enregistré ✅";
 });
 
-socket.on("vote:ok", () => {
-  // optionnel
-});
+socket.on("vote:ok", () => {});
 
 socket.on("room:state", (s) => {
   state = s;
 
-  if (phaseText) phaseText.textContent = `Phase : ${phaseLabel(state.phase)}`;
+  const playersCount = Number(state.playersCount ?? (state.players || []).length);
+  const requiredPlayers = Number(state.requiredPlayers || 0);
 
-  const me = (state.players || []).find((p) => p.id === socket.id);
+  if (phaseText) {
+    const base = `Phase : ${phaseLabel(state.phase)}`;
+    if (state.phase === "waiting" && requiredPlayers) {
+      phaseText.textContent = `${base} (${playersCount}/${requiredPlayers})`;
+    } else {
+      phaseText.textContent = base;
+    }
+  }
+
+  // me
+  const me = (state.players || []).find(p => p.id === socket.id);
   myAvatarId = me?.avatarId || null;
   mySubmitted = !!me?.submitted;
 
-  // ✅ Scoreboard en temps réel
+  // scoreboard
   renderScoreBar(state.players || []);
 
+  // panels
   setPanelsByPhase(state.phase);
 
-  // avatars
-  renderAvatarGrid(avatarGrid, state.takenAvatars || [], (avatarId) => {
+  // ✅ avatars + noms (pris/libre)
+  renderAvatarGrid(avatarGrid, state.players || [], state.takenAvatars || [], (avatarId) => {
     if (msg) msg.textContent = "";
     socket.emit("avatar:pick", { roomId, avatarId });
   });
 
-  // secrets : disparaît après submit
+  // secrets : composer caché si déjà soumis
   if (state.phase === "secrets") {
     hideSecretComposer(mySubmitted);
     if (!mySubmitted && msg) msg.textContent = "Écris ton secret (une seule fois).";
   }
 
-  // vote: afficher secrets
+  // vote
   if (state.phase === "vote") {
     if (msg) msg.textContent = "";
     renderSecrets(state.secrets || []);
@@ -273,11 +333,14 @@ socket.on("room:state", (s) => {
     if (secretGrid) secretGrid.innerHTML = "";
   }
 
-  // results : secrets disparus + classement
+  // results
   if (state.phase === "results") {
     if (secretGrid) secretGrid.innerHTML = "";
     renderResults(state.players || []);
   }
+
+  // si modal ouverte, refresh
+  if (modal && modal.classList.contains("open")) renderVoteAvatars();
 });
 
 socket.on("error:msg", (t) => {
