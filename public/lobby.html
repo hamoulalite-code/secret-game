@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Secret Game - Salon</title>
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body style="max-width:900px;margin:0 auto;padding:16px;">
+  <h1>Salon</h1>
+
+  <div id="meBox" style="margin-bottom:12px;"></div>
+
+  <section class="card" style="margin-bottom:16px;">
+    <h2>Créer / Rejoindre</h2>
+
+    <button id="createRoomBtn">Créer un salon</button>
+
+    <div style="height:10px"></div>
+
+    <form id="joinRoomForm" class="grid">
+      <input name="code" placeholder="Code salon (ex: ABC123)" required />
+      <button type="submit">Rejoindre</button>
+    </form>
+
+    <div id="roomMsg" class="msg"></div>
+    <div style="margin-top:8px;">Salon actuel : <b id="roomCode">-</b></div>
+  </section>
+
+  <section class="card" style="margin-bottom:16px;">
+    <h2>Mon secret</h2>
+    <form id="secretForm" class="grid">
+      <input name="secretText" placeholder="Écris ton secret" required />
+      <button type="submit">Enregistrer</button>
+    </form>
+    <div id="secretMsg" class="msg"></div>
+  </section>
+
+  <section class="card">
+    <h2>État du salon</h2>
+    <button id="refreshBtn">Rafraîchir</button>
+    <div id="stateMsg" class="msg"></div>
+
+    <h3>Joueurs</h3>
+    <ul id="players"></ul>
+
+    <h3>Secrets</h3>
+    <div id="secrets"></div>
+  </section>
+
+  <script src="./js/api.js"></script>
+  <script src="./js/lobby.js"></script>
+</body>
+</html>

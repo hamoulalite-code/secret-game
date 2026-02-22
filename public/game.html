@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Game - secret GAME</title>
+  <link rel="stylesheet" href="./css/app.css" />
+  <link rel="stylesheet" href="./css/game.css" />
+</head>
+<body>
+  <header class="top">
+    <h1 class="brand"><span class="brand-secret">secret</span><span class="brand-game">GAME</span></h1>
+  </header>
+
+  <main class="wrap">
+    <div class="row between">
+      <div>
+        <h2 id="roomTitle">Salle</h2>
+        <p class="muted" id="phaseText"></p>
+      </div>
+      <a class="btn ghost" href="./lobby.html">Quitter</a>
+    </div>
+
+    <!-- Étape 1: choisir avatar -->
+    <section class="panel" id="panelAvatar">
+      <h3>Choisis ton avatar</h3>
+      <p class="muted">Un avatar ne peut être pris que par une seule personne.</p>
+      <div id="avatarGrid" class="grid avatars"></div>
+    </section>
+
+    <!-- Étape 2: écrire secret -->
+    <section class="panel" id="panelSecret">
+      <h3>Écris ton secret</h3>
+      <textarea id="secretInput" class="textarea" placeholder="Écris ton secret ici..."></textarea>
+      <div class="row right">
+        <button id="sendSecretBtn" class="btn">Valider mon secret</button>
+        <button id="goVoteBtn" class="btn ghost">Passer au vote</button>
+      </div>
+      <p class="muted" id="msg"></p>
+    </section>
+
+    <!-- Étape 3: vote sur les secrets -->
+    <section class="panel" id="panelVote">
+      <div class="row between">
+        <h3>Vote : à qui appartient ce secret ?</h3>
+        <button id="showResultsBtn" class="btn ghost">Voir résultats</button>
+      </div>
+      <div id="secretGrid" class="grid secrets"></div>
+      <p class="muted">Clique une carte secret, puis choisis l’avatar correspondant.</p>
+    </section>
+
+    <!-- Résultats -->
+    <section class="panel" id="panelResults">
+      <h3>Résultats</h3>
+      <div id="resultsList" class="results"></div>
+    </section>
+  </main>
+
+  <!-- Modal choix avatar pour voter -->
+  <div class="modal" id="modal" aria-hidden="true">
+    <div class="modal-card">
+      <div class="row between">
+        <h3 id="modalTitle">Choisis l’avatar</h3>
+        <button class="iconBtn" id="closeModalBtn">✕</button>
+      </div>
+      <div id="voteAvatarGrid" class="grid avatars"></div>
+      <div class="row right" style="margin-top:12px;">
+        <button class="btn ghost" id="cancelVoteBtn">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="./js/game.js"></script>
+</body>
+</html>

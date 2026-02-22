@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Lobby - secret GAME</title>
+  <link rel="stylesheet" href="./css/app.css" />
+  <link rel="stylesheet" href="./css/lobby.css" />
+</head>
+<body>
+  <header class="top">
+    <h1 class="brand"><span class="brand-secret">secret</span><span class="brand-game">GAME</span></h1>
+  </header>
+
+  <main class="wrap">
+    <h2>Choisis un serveur</h2>
+
+    <div class="server-table">
+      <div class="server-table-head">
+        <div>Serveur</div>
+        <div>Joueurs</div>
+        <div>Secrets</div>
+        <div>Phase</div>
+      </div>
+      <div id="serverRows" class="server-table-body"></div>
+    </div>
+
+    <div class="actions">
+      <button id="joinBtn" class="btn" disabled>Rejoindre</button>
+
+      <div class="create">
+        <input id="createName" class="input" placeholder="Nom du serveur (option)" />
+        <button id="createBtn" class="btn">Créer</button>
+      </div>
+    </div>
+
+    <p class="muted" id="msg"></p>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="./js/lobby.js"></script>
+</body>
+</html>
