@@ -9,7 +9,7 @@ const io = new Server(server);
 
 const PORT = process.env.PORT || 3001;
 
-// Servir les fichiers du dossier public
+// Servir le dossier public
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 // ------------------ Données en mémoire ------------------
@@ -25,7 +25,7 @@ function createRoom(id, name) {
     players: new Map(), // socketId -> {id, avatarId, submitted}
     secrets: [], // [{secretId,text,ownerSocketId,ownerAvatarId}]
     votes: new Map(), // voterSocketId -> Map(secretId -> guessedSocketId)
-    scores: new Map(), // socketId -> points
+    scores: new Map(), // socketId -> number
   };
 }
 
@@ -54,8 +54,7 @@ function publicState(room) {
 
   const takenAvatars = players.filter((p) => p.avatarId).map((p) => p.avatarId);
 
-  // ✅ On envoie ownerSocketId (pour empêcher de voter pour son propre secret côté client)
-  // (on ne l’affiche pas à l’écran, c’est juste pour la logique)
+  // On envoie ownerSocketId juste pour empêcher le vote sur son propre secret côté client
   const secrets = room.secrets.map((s) => ({
     secretId: s.secretId,
     text: s.text,
@@ -77,7 +76,12 @@ function broadcastRoom(roomId) {
   if (!room) return;
 
   io.to(roomId).emit("room:state", publicState(room));
-  io.emit("rooms:list", roomsList()); // lobby en temps réel
+  io.emit("rooms:list", roomsList()); // lobby temps réel
+}
+
+function allHaveAvatar(room) {
+  if (room.players.size === 0) return false;
+  return Array.from(room.players.values()).every((p) => !!p.avatarId);
 }
 
 function allSecretsSubmitted(room) {
@@ -86,7 +90,7 @@ function allSecretsSubmitted(room) {
 }
 
 function requiredVotesForVoter(room, voterId) {
-  // ✅ Tu votes pour tous les secrets SAUF le tien
+  // Tu votes pour tous les secrets sauf le tien
   return room.secrets.filter((s) => s.ownerSocketId !== voterId).length;
 }
 
@@ -107,10 +111,10 @@ function computeScores(room) {
   // reset
   for (const pid of room.players.keys()) room.scores.set(pid, 0);
 
-  // +1 point pour chaque vote correct
+  // +1 point pour chaque vote correct (votant)
   for (const [voterId, perVoter] of room.votes.entries()) {
     for (const s of room.secrets) {
-      if (s.ownerSocketId === voterId) continue; // pas de vote sur son secret
+      if (s.ownerSocketId === voterId) continue;
       const guess = perVoter.get(s.secretId);
       if (!guess) continue;
       if (guess === s.ownerSocketId) {
@@ -120,21 +124,10 @@ function computeScores(room) {
   }
 }
 
-function resetRound(room) {
-  room.phase = "avatar";
-  room.secrets = [];
-  room.votes = new Map();
-  // on garde les scores ? -> là on garde pour la session
-  // si tu veux reset score à chaque partie, dis-moi
-  for (const pid of room.players.keys()) {
-    room.votes.set(pid, new Map());
-  }
-}
-
 // ------------------ Socket.io ------------------
 
 io.on("connection", (socket) => {
-  // Lobby: compat rooms:list + rooms:get
+  // Lobby compat
   socket.on("rooms:list", () => socket.emit("rooms:list", roomsList()));
   socket.on("rooms:get", () => socket.emit("rooms:list", roomsList()));
 
@@ -173,7 +166,7 @@ io.on("connection", (socket) => {
     const player = room.players.get(socket.id);
     if (!player) return;
 
-    // unique avatar
+    // avatar unique
     for (const [, p] of room.players.entries()) {
       if (p.avatarId === avatarId && p.id !== socket.id) {
         socket.emit("error:msg", "Avatar déjà pris.");
@@ -183,12 +176,9 @@ io.on("connection", (socket) => {
 
     player.avatarId = avatarId;
 
-    // si tout le monde a un avatar, on passe à secrets
-    const allHaveAvatar =
-      room.players.size > 0 &&
-      Array.from(room.players.values()).every((p) => !!p.avatarId);
-
-    if (allHaveAvatar && room.phase === "avatar") room.phase = "secrets";
+    if (room.phase === "avatar" && allHaveAvatar(room)) {
+      room.phase = "secrets";
+    }
 
     broadcastRoom(roomId);
   });
@@ -205,15 +195,15 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // ✅ Bloque si déjà envoyé (tu voulais 1 seule fois)
+    // ✅ 1 seul secret
     if (player.submitted) {
       socket.emit("error:msg", "Secret déjà envoyé.");
       return;
     }
 
-    // ✅ Interdit hors phase secrets
-    if (room.phase !== "secrets" && room.phase !== "avatar") {
-      socket.emit("error:msg", "Tu ne peux plus envoyer de secret maintenant.");
+    // ✅ seulement en phase secrets
+    if (room.phase !== "secrets") {
+      socket.emit("error:msg", "Tu ne peux pas envoyer de secret maintenant.");
       return;
     }
 
@@ -232,15 +222,12 @@ io.on("connection", (socket) => {
       ownerAvatarId: player.avatarId,
     });
 
-    // ✅ si tous les secrets envoyés => vote
+    // si tous ont soumis => vote
     if (allSecretsSubmitted(room)) {
       room.phase = "vote";
-      // init votes maps
       for (const pid of room.players.keys()) {
         if (!room.votes.has(pid)) room.votes.set(pid, new Map());
       }
-    } else {
-      room.phase = "secrets";
     }
 
     socket.emit("secret:ok");
@@ -262,13 +249,12 @@ io.on("connection", (socket) => {
     const secret = room.secrets.find((s) => s.secretId === secretId);
     if (!secret) return;
 
-    // ✅ pas voter sur son propre secret
+    // pas voter son propre secret
     if (secret.ownerSocketId === socket.id) {
       socket.emit("error:msg", "Tu ne peux pas voter pour ton propre secret.");
       return;
     }
 
-    // guessedSocketId doit être un joueur
     if (!room.players.has(guessedSocketId)) {
       socket.emit("error:msg", "Joueur invalide.");
       return;
@@ -280,22 +266,10 @@ io.on("connection", (socket) => {
 
     socket.emit("vote:ok");
 
-    // ✅ fin automatique quand tout le monde a voté
+    // fin auto
     if (allVotesSubmitted(room)) {
       computeScores(room);
       room.phase = "results";
-
-      // ✅ les secrets disparaissent après vote (comme tu veux)
-      // (on ne supprime pas l'historique côté serveur si tu veux le réafficher plus tard)
-      // Ici on le cache juste côté client via la phase results.
-
-      io.to(roomId).emit("results:scoreboard", {
-        scores: Array.from(room.players.values()).map((p) => ({
-          id: p.id,
-          avatarId: p.avatarId,
-          score: Number(room.scores.get(p.id) || 0),
-        })),
-      });
     }
 
     broadcastRoom(roomId);
@@ -309,6 +283,15 @@ io.on("connection", (socket) => {
         room.votes.delete(socket.id);
         room.scores.delete(socket.id);
         room.secrets = room.secrets.filter((s) => s.ownerSocketId !== socket.id);
+
+        // si plus personne -> reset
+        if (room.players.size === 0) {
+          room.phase = "avatar";
+          room.secrets = [];
+          room.votes = new Map();
+          room.scores = new Map();
+        }
+
         broadcastRoom(roomId);
       }
     }

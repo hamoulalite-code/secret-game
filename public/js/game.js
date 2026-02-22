@@ -10,10 +10,12 @@ const panelSecret = document.getElementById("panelSecret");
 const panelVote = document.getElementById("panelVote");
 const panelResults = document.getElementById("panelResults");
 
+const scoreBar = document.getElementById("scoreBar");
+const scoreHint = document.getElementById("scoreHint");
+
 const avatarGrid = document.getElementById("avatarGrid");
 const secretInput = document.getElementById("secretInput");
 const sendSecretBtn = document.getElementById("sendSecretBtn");
-const goVoteBtn = document.getElementById("goVoteBtn");
 const msg = document.getElementById("msg");
 
 const secretGrid = document.getElementById("secretGrid");
@@ -36,8 +38,6 @@ const AVATARS = Array.from({ length: 12 }, (_, i) => {
   return { id, src: `/assets/avatars/${id}.png`, label: `Avatar ${i + 1}` };
 });
 
-if (roomTitle) roomTitle.textContent = roomId ? `Salle : ${roomId}` : "Salle";
-
 function phaseLabel(p) {
   if (p === "avatar") return "Choix avatars";
   if (p === "secrets") return "Écriture des secrets";
@@ -54,20 +54,15 @@ function escapeHtml(str) {
 
 function setPanelsByPhase(phase) {
   if (panelAvatar) panelAvatar.style.display = (phase === "avatar") ? "" : "none";
-
-  // secret panel visible seulement en secrets (et avatar si tu veux voir l’étape)
-  if (panelSecret) panelSecret.style.display = (phase === "secrets" || phase === "avatar") ? "" : "none";
-
+  if (panelSecret) panelSecret.style.display = (phase === "secrets") ? "" : "none";
   if (panelVote) panelVote.style.display = (phase === "vote") ? "" : "none";
   if (panelResults) panelResults.style.display = (phase === "results") ? "" : "none";
 }
 
-function setSecretUIHidden(hidden) {
+function hideSecretComposer(hidden) {
   if (!panelSecret) return;
-  // on cache seulement la zone d’écriture + boutons, pas le panel entier
   if (secretInput) secretInput.style.display = hidden ? "none" : "";
   if (sendSecretBtn) sendSecretBtn.style.display = hidden ? "none" : "";
-  if (goVoteBtn) goVoteBtn.style.display = hidden ? "none" : "";
 }
 
 function renderAvatarGrid(container, takenAvatars, onPick) {
@@ -93,7 +88,7 @@ function renderSecrets(secrets) {
   secretGrid.innerHTML = "";
 
   (secrets || []).forEach((s) => {
-    // on cache ton propre secret (pas de vote dessus)
+    // on ne vote pas sur son propre secret
     if (s.ownerSocketId === socket.id) return;
 
     const card = document.createElement("div");
@@ -151,23 +146,56 @@ function renderVoteAvatars() {
   });
 }
 
-function renderScoreboard(players) {
+// ✅ SCOREBOARD PRO (en haut)
+function renderScoreBar(players) {
+  if (!scoreBar) return;
+  const list = (players || [])
+    .filter(p => p.avatarId)
+    .map(p => ({ ...p, score: Number(p.score || 0) }))
+    .sort((a, b) => b.score - a.score);
+
+  scoreBar.innerHTML = "";
+
+  if (!list.length) {
+    scoreBar.innerHTML = `<div class="muted">En attente des joueurs…</div>`;
+    return;
+  }
+
+  for (const p of list) {
+    const av = AVATARS.find(a => a.id === p.avatarId);
+    const el = document.createElement("div");
+    el.className = "score-pill" + (p.id === socket.id ? " me" : "");
+    el.innerHTML = `
+      <img class="score-avatar" src="${av ? av.src : ""}" alt="" />
+      <div class="score-name">${escapeHtml(av ? av.label : "Joueur")}</div>
+      <div class="score-points">${p.score}</div>
+    `;
+    scoreBar.appendChild(el);
+  }
+
+  if (scoreHint) {
+    const me = list.find(x => x.id === socket.id);
+    scoreHint.textContent = me ? `Toi : ${me.score} point(s)` : "Temps réel";
+  }
+}
+
+function renderResults(players) {
   if (!resultsList) return;
   resultsList.innerHTML = "";
-
   const sorted = (players || [])
-    .map((p) => ({ ...p, score: Number(p.score || 0) }))
+    .filter(p => p.avatarId)
+    .map(p => ({ ...p, score: Number(p.score || 0) }))
     .sort((a, b) => b.score - a.score);
 
   sorted.forEach((p, idx) => {
-    const avatar = AVATARS.find((a) => a.id === p.avatarId);
+    const av = AVATARS.find(a => a.id === p.avatarId);
     const item = document.createElement("div");
     item.className = "result-item";
     item.innerHTML = `
       <div style="display:flex;align-items:center;gap:10px;">
         <div class="badge">#${idx + 1}</div>
-        <img class="avatar-img" src="${avatar ? avatar.src : ""}" style="width:44px;height:44px;border-radius:12px;" />
-        <div style="font-weight:800;">${escapeHtml(avatar ? avatar.label : "Joueur")}</div>
+        <img class="avatar-img" src="${av ? av.src : ""}" style="width:44px;height:44px;border-radius:12px;" />
+        <div style="font-weight:800;">${escapeHtml(av ? av.label : "Joueur")}</div>
         <div style="margin-left:auto" class="badge">${p.score} point(s)</div>
       </div>
     `;
@@ -203,8 +231,12 @@ socket.on("room:joined", ({ roomName }) => {
 socket.on("secret:ok", () => {
   mySubmitted = true;
   if (secretInput) secretInput.value = "";
-  setSecretUIHidden(true);
+  hideSecretComposer(true);
   if (msg) msg.textContent = "Secret enregistré ✅";
+});
+
+socket.on("vote:ok", () => {
+  // optionnel
 });
 
 socket.on("room:state", (s) => {
@@ -212,10 +244,12 @@ socket.on("room:state", (s) => {
 
   if (phaseText) phaseText.textContent = `Phase : ${phaseLabel(state.phase)}`;
 
-  // moi
   const me = (state.players || []).find((p) => p.id === socket.id);
   myAvatarId = me?.avatarId || null;
   mySubmitted = !!me?.submitted;
+
+  // ✅ Scoreboard en temps réel
+  renderScoreBar(state.players || []);
 
   setPanelsByPhase(state.phase);
 
@@ -225,42 +259,25 @@ socket.on("room:state", (s) => {
     socket.emit("avatar:pick", { roomId, avatarId });
   });
 
-  // secret UI : disparaît après submit
+  // secrets : disparaît après submit
   if (state.phase === "secrets") {
-    setSecretUIHidden(mySubmitted);
+    hideSecretComposer(mySubmitted);
     if (!mySubmitted && msg) msg.textContent = "Écris ton secret (une seule fois).";
   }
 
-  // vote
+  // vote: afficher secrets
   if (state.phase === "vote") {
-    // secrets visibles pendant vote uniquement
+    if (msg) msg.textContent = "";
     renderSecrets(state.secrets || []);
   } else {
-    // secrets disparaissent hors vote
     if (secretGrid) secretGrid.innerHTML = "";
   }
 
-  // results
+  // results : secrets disparus + classement
   if (state.phase === "results") {
-    // secrets disparaissent + scoreboard
     if (secretGrid) secretGrid.innerHTML = "";
-    renderScoreboard(state.players || []);
-    if (msg) msg.textContent = "";
+    renderResults(state.players || []);
   }
-});
-
-socket.on("results:scoreboard", ({ scores }) => {
-  // si jamais ça arrive avant room:state results, on affiche quand même
-  if (state) state.phase = "results";
-  setPanelsByPhase("results");
-
-  // on met à jour les scores dans state.players
-  if (state && state.players) {
-    const map = new Map((scores || []).map((x) => [x.id, x.score]));
-    state.players = state.players.map((p) => ({ ...p, score: map.get(p.id) ?? p.score ?? 0 }));
-  }
-
-  renderScoreboard(state?.players || []);
 });
 
 socket.on("error:msg", (t) => {

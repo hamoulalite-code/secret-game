@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Game - secret GAME</title>
+  <title>Game - Secret Game</title>
   <link rel="stylesheet" href="./css/app.css" />
   <link rel="stylesheet" href="./css/game.css" />
 </head>
@@ -21,42 +21,50 @@
       <a class="btn ghost" href="./lobby.html">Quitter</a>
     </div>
 
-    <!-- Étape 1: choisir avatar -->
+    <!-- ✅ SCOREBOARD PRO -->
+    <section class="panel score-panel">
+      <div class="row between">
+        <h3 style="margin:0">Classement</h3>
+        <span class="muted" id="scoreHint">Temps réel</span>
+      </div>
+      <div id="scoreBar" class="scorebar"></div>
+    </section>
+
+    <!-- Étape 1 -->
     <section class="panel" id="panelAvatar">
       <h3>Choisis ton avatar</h3>
       <p class="muted">Un avatar ne peut être pris que par une seule personne.</p>
       <div id="avatarGrid" class="grid avatars"></div>
     </section>
 
-    <!-- Étape 2: écrire secret -->
+    <!-- Étape 2 -->
     <section class="panel" id="panelSecret">
       <h3>Écris ton secret</h3>
       <textarea id="secretInput" class="textarea" placeholder="Écris ton secret ici..."></textarea>
       <div class="row right">
         <button id="sendSecretBtn" class="btn">Valider mon secret</button>
-        <button id="goVoteBtn" class="btn ghost">Passer au vote</button>
       </div>
       <p class="muted" id="msg"></p>
     </section>
 
-    <!-- Étape 3: vote sur les secrets -->
+    <!-- Étape 3 -->
     <section class="panel" id="panelVote">
       <div class="row between">
         <h3>Vote : à qui appartient ce secret ?</h3>
-        <button id="showResultsBtn" class="btn ghost">Voir résultats</button>
+        <span class="muted">Clique un secret → choisis un avatar</span>
       </div>
       <div id="secretGrid" class="grid secrets"></div>
-      <p class="muted">Clique une carte secret, puis choisis l’avatar correspondant.</p>
     </section>
 
     <!-- Résultats -->
     <section class="panel" id="panelResults">
       <h3>Résultats</h3>
+      <p class="muted">Les points ont été ajoutés ✅</p>
       <div id="resultsList" class="results"></div>
     </section>
   </main>
 
-  <!-- Modal choix avatar pour voter -->
+  <!-- Modal vote -->
   <div class="modal" id="modal" aria-hidden="true">
     <div class="modal-card">
       <div class="row between">
