@@ -1,35 +1,163 @@
-*{box-sizing:border-box}
-body{
-  margin:0;
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
-  background:#0b0f17;
-  color:#e9eef8;
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: Arial, sans-serif;
 }
-.center{
-  min-height:100vh;
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  padding:16px;
+
+body {
+  min-height: 100vh;
+  overflow: hidden;
+  color: white;
 }
-.card{
-  width:min(560px, 100%);
-  padding:18px 16px;
-  border-radius:16px;
-  border:1px solid rgba(255,255,255,.10);
-  background:rgba(255,255,255,.06);
+
+/* INTRO */
+#intro {
+  position: fixed;
+  inset: 0;
+  background: black;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 15px;
+  z-index: 9999;
+  animation: fadeOutIntro 1s ease 4.5s forwards;
 }
-.brand{margin:0; display:flex; gap:10px; align-items:baseline; user-select:none;}
-.brand-secret{font-size:18px; opacity:.55;}
-.brand-game{font-size:44px; font-weight:900; letter-spacing:.6px;}
-.muted{opacity:.75}
-.btn{
-  display:inline-flex;
-  padding:10px 14px;
-  border-radius:12px;
-  border:1px solid rgba(255,255,255,.14);
-  background:rgba(255,255,255,.10);
-  color:inherit;
-  text-decoration:none;
-  cursor:pointer;
+
+.intro-logo {
+  width: 320px;
+  animation: zoomLogo 3.5s ease forwards;
+  filter: drop-shadow(0 0 35px white);
+}
+
+.intro-text {
+  opacity: 0;
+  font-size: 16px;
+  animation: showText 1.5s ease 1.5s forwards;
+}
+
+.intro-flash {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle, rgba(255,255,255,0.7), transparent 60%);
+  opacity: 0;
+  animation: flash 1s ease 2.5s forwards;
+}
+
+@keyframes zoomLogo {
+  0% { transform: scale(0.3); opacity: 0; }
+  50% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+@keyframes showText {
+  to { opacity: 1; }
+}
+
+@keyframes flash {
+  0% { opacity: 0; }
+  50% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes fadeOutIntro {
+  to { opacity: 0; visibility: hidden; }
+}
+
+.hidden {
+  display: none;
+}
+
+/* FOND */
+#main-content {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+}
+
+.bg {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, #ff5ecf, #7b5cff, #4fd6ff);
+  z-index: 0;
+}
+
+.bg-overlay {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at top right, rgba(255,255,255,0.4), transparent 50%),
+    radial-gradient(circle at bottom left, rgba(255,255,255,0.3), transparent 50%);
+  z-index: 1;
+}
+
+.sparkles {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle, rgba(255,255,255,0.6) 1px, transparent 2px);
+  background-size: 150px 150px;
+  opacity: 0.3;
+  animation: moveSparkles 10s linear infinite;
+  z-index: 2;
+}
+
+@keyframes moveSparkles {
+  from { transform: translate(0,0); }
+  to { transform: translate(-150px,-150px); }
+}
+
+/* LOGO */
+.main-header {
+  position: absolute;
+  top: 30px;
+  z-index: 5;
+}
+
+.main-logo {
+  width: 280px;
+  animation: glow 2s infinite alternate;
+}
+
+@keyframes glow {
+  from { filter: drop-shadow(0 0 10px white); }
+  to { filter: drop-shadow(0 0 40px white); }
+}
+
+/* CONTENU */
+.home-container {
+  z-index: 6;
+  text-align: center;
+}
+
+.home-container h1 {
+  font-size: 45px;
+  margin-bottom: 15px;
+  text-shadow: 0 0 20px rgba(255,255,255,0.6);
+}
+
+.home-container p {
+  margin-bottom: 30px;
+  font-size: 18px;
+}
+
+.main-btn {
+  padding: 15px 40px;
+  border: none;
+  border-radius: 50px;
+  font-size: 18px;
+  background: linear-gradient(45deg, #ff00cc, #2f6bff);
+  color: white;
+  cursor: pointer;
+  transition: 0.3s;
+  box-shadow: 0 0 25px rgba(255,255,255,0.6);
+}
+
+.main-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 0 45px rgba(255,255,255,1);
 }

@@ -1,54 +1,132 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Secret Game - Salon</title>
-  <link rel="stylesheet" href="./css/style.css" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lobby • Secret Game</title>
+  <link rel="stylesheet" href="/css/lobby.css" />
 </head>
-<body style="max-width:900px;margin:0 auto;padding:16px;">
-  <h1>Salon</h1>
+<body>
 
-  <div id="meBox" style="margin-bottom:12px;"></div>
+  <!-- BACKGROUND -->
+  <div class="bg"></div>
+  <div class="bg-overlay"></div>
+  <div class="sparkles"></div>
 
-  <section class="card" style="margin-bottom:16px;">
-    <h2>Créer / Rejoindre</h2>
+  <!-- TOP BAR -->
+  <header class="topbar">
+    <div class="brand">
+      <img src="/images/logo-secret-story.png" class="logo" alt="logo" />
+      <div class="brand-text">
+        <div class="brand-title">Secret Game</div>
+        <div class="brand-sub">Choisis ton serveur</div>
+      </div>
+    </div>
 
-    <button id="createRoomBtn">Créer un salon</button>
+    <div class="actions">
+      <button id="btn-refresh" class="pill" type="button">Rafraîchir</button>
+      <a class="pill pill-ghost" href="/index.html">Accueil</a>
+    </div>
+  </header>
 
-    <div style="height:10px"></div>
+  <main class="wrap">
 
-    <form id="joinRoomForm" class="grid">
-      <input name="code" placeholder="Code salon (ex: ABC123)" required />
-      <button type="submit">Rejoindre</button>
-    </form>
+    <!-- HERO -->
+    <section class="hero">
+      <h1>Liste des serveurs</h1>
+      <p>Rejoins une salle comme dans un MMO. Statut en direct, joueurs, et accès rapide.</p>
+    </section>
 
-    <div id="roomMsg" class="msg"></div>
-    <div style="margin-top:8px;">Salon actuel : <b id="roomCode">-</b></div>
-  </section>
+    <!-- CONTROLS -->
+    <section class="controls card">
+      <div class="control">
+        <label for="search">Recherche</label>
+        <input id="search" type="text" placeholder="Tape un nom ou un id… (ex: room-1)" autocomplete="off" />
+      </div>
 
-  <section class="card" style="margin-bottom:16px;">
-    <h2>Mon secret</h2>
-    <form id="secretForm" class="grid">
-      <input name="secretText" placeholder="Écris ton secret" required />
-      <button type="submit">Enregistrer</button>
-    </form>
-    <div id="secretMsg" class="msg"></div>
-  </section>
+      <div class="control">
+        <label for="sort">Trier</label>
+        <select id="sort">
+          <option value="players_desc">Joueurs (desc)</option>
+          <option value="players_asc">Joueurs (asc)</option>
+          <option value="name_asc">Nom (A→Z)</option>
+          <option value="name_desc">Nom (Z→A)</option>
+          <option value="ping_asc">Ping (asc)</option>
+          <option value="ping_desc">Ping (desc)</option>
+        </select>
+      </div>
 
-  <section class="card">
-    <h2>État du salon</h2>
-    <button id="refreshBtn">Rafraîchir</button>
-    <div id="stateMsg" class="msg"></div>
+      <div class="control">
+        <label for="status">Statut</label>
+        <select id="status">
+          <option value="all">Tous</option>
+          <option value="open">Ouvert</option>
+          <option value="full">Complet</option>
+        </select>
+      </div>
 
-    <h3>Joueurs</h3>
-    <ul id="players"></ul>
+      <div class="control control-right">
+        <label>&nbsp;</label>
+        <button id="btn-quick" class="btn btn-primary" type="button">Rejoindre rapide</button>
+      </div>
+    </section>
 
-    <h3>Secrets</h3>
-    <div id="secrets"></div>
-  </section>
+    <!-- TABLE -->
+    <section class="card table-card">
+      <div class="table-head">
+        <div class="table-title">Serveurs disponibles</div>
+        <div class="table-meta">
+          <span id="rooms-count">0</span> serveurs •
+          <span id="last-update">—</span>
+        </div>
+      </div>
 
-  <script src="./js/api.js"></script>
-  <script src="./js/lobby.js"></script>
+      <div class="table-wrap" role="region" aria-label="Liste des serveurs" tabindex="0">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Serveur</th>
+              <th class="hide-sm">ID</th>
+              <th>Joueurs</th>
+              <th class="hide-sm">Ping</th>
+              <th>Statut</th>
+              <th class="right">Action</th>
+            </tr>
+          </thead>
+          <tbody id="rooms-tbody">
+            <!-- rows injected -->
+          </tbody>
+        </table>
+      </div>
+
+      <div id="empty" class="empty hidden">
+        Aucun serveur ne correspond à ta recherche.
+      </div>
+    </section>
+
+    <!-- JOIN PANEL -->
+    <section class="card join-card">
+      <div class="join-left">
+        <div class="join-title">Rejoindre un serveur</div>
+        <div class="join-sub">Choisis un serveur dans le tableau ou entre un ID.</div>
+      </div>
+
+      <div class="join-right">
+        <input id="join-id" class="join-input" type="text" placeholder="Ex: room-1" />
+        <button id="btn-join" class="btn btn-glow" type="button">Rejoindre</button>
+      </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer class="foot">
+      <span class="dot"></span>
+      <span id="conn-state">Connexion…</span>
+    </footer>
+
+  </main>
+
+  <!-- socket.io (si tu l'utilises déjà) -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/lobby.js"></script>
 </body>
 </html>

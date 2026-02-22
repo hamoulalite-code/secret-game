@@ -1,7 +1,9 @@
 const socket = io();
 
 const qs = new URLSearchParams(location.search);
-const roomId = qs.get("roomId");
+
+// ✅ accepte roomId OU room
+const roomId = qs.get("roomId") || qs.get("room");
 
 const roomTitle = document.getElementById("roomTitle");
 const phaseText = document.getElementById("phaseText");
@@ -31,6 +33,9 @@ let state = null;
 let myAvatarId = null;
 let selectedSecretIdForVote = null;
 
+// ✅ Affiche la salle direct (même si room:joined n'arrive pas)
+if (roomTitle) roomTitle.textContent = roomId ? `Salle : ${roomId}` : "Salle";
+
 // ----------- avatars disponibles (12)
 const AVATARS = Array.from({ length: 12 }, (_, i) => {
   const id = `a${i + 1}`;
@@ -38,11 +43,14 @@ const AVATARS = Array.from({ length: 12 }, (_, i) => {
 });
 
 function setPanelsByPhase(phase) {
-  // On montre tout mais on guide selon phase
+  if (!panelAvatar || !panelSecret || !panelVote || !panelResults) return;
+
   panelAvatar.style.display = (phase === "avatar") ? "" : "none";
 
-  // secret phase visible si avatar choisi ou si phase secrets/vote/results
-  panelSecret.style.display = (phase === "secrets" || phase === "vote" || phase === "results" || phase === "avatar") ? "" : "none";
+  panelSecret.style.display =
+    (phase === "secrets" || phase === "vote" || phase === "results" || phase === "avatar")
+      ? ""
+      : "none";
 
   panelVote.style.display = (phase === "vote" || phase === "results") ? "" : "none";
   panelResults.style.display = (phase === "results") ? "" : "none";
@@ -58,17 +66,26 @@ function phaseLabel(p) {
 
 function escapeHtml(str) {
   return (str || "").replace(/[&<>"']/g, (m) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;"
   })[m]);
 }
 
 function renderAvatarGrid(container, takenAvatars, clickable, onPick) {
+  if (!container) return;
   container.innerHTML = "";
 
   AVATARS.forEach((a) => {
-    const taken = takenAvatars.includes(a.id) && a.id !== myAvatarId; // moi je peux garder le mien
+    const taken = (takenAvatars || []).includes(a.id) && a.id !== myAvatarId;
     const card = document.createElement("div");
-    card.className = "avatar-card" + (taken ? " taken" : "") + (a.id === myAvatarId ? " selected" : "");
+    card.className =
+      "avatar-card" +
+      (taken ? " taken" : "") +
+      (a.id === myAvatarId ? " selected" : "");
+
     card.innerHTML = `
       <img class="avatar-img" src="${a.src}" alt="${escapeHtml(a.label)}" />
       <div class="small">${escapeHtml(a.label)}</div>
@@ -83,8 +100,10 @@ function renderAvatarGrid(container, takenAvatars, clickable, onPick) {
 }
 
 function renderSecrets(secrets) {
+  if (!secretGrid) return;
   secretGrid.innerHTML = "";
-  secrets.forEach((s) => {
+
+  (secrets || []).forEach((s) => {
     const card = document.createElement("div");
     card.className = "secret-card";
     card.innerHTML = `<div>${escapeHtml(s.text)}</div>`;
@@ -95,28 +114,28 @@ function renderSecrets(secrets) {
 
 function openVoteModal(secretId) {
   if (!state || state.phase !== "vote") {
-    msg.textContent = "Le vote n'est pas encore actif.";
+    if (msg) msg.textContent = "Le vote n'est pas encore actif.";
     return;
   }
   selectedSecretIdForVote = secretId;
-  modalTitle.textContent = "Choisis l’avatar correspondant";
+  if (modalTitle) modalTitle.textContent = "Choisis l’avatar correspondant";
   renderVoteAvatars();
-  modal.classList.add("open");
+  if (modal) modal.classList.add("open");
 }
 
 function closeVoteModal() {
   selectedSecretIdForVote = null;
-  modal.classList.remove("open");
+  if (modal) modal.classList.remove("open");
 }
 
 function renderVoteAvatars() {
-  // On affiche seulement les joueurs présents avec avatar
+  if (!voteAvatarGrid) return;
   voteAvatarGrid.innerHTML = "";
 
-  const players = (state?.players || []).filter(p => p.avatarId);
+  const players = (state?.players || []).filter((p) => p.avatarId);
 
   players.forEach((p) => {
-    const avatar = AVATARS.find(a => a.id === p.avatarId);
+    const avatar = AVATARS.find((a) => a.id === p.avatarId);
     if (!avatar) return;
 
     const card = document.createElement("div");
@@ -125,6 +144,7 @@ function renderVoteAvatars() {
       <img class="avatar-img" src="${avatar.src}" alt="${escapeHtml(avatar.label)}" />
       <div class="small">${escapeHtml(avatar.label)}</div>
     `;
+
     card.addEventListener("click", () => {
       socket.emit("vote:cast", {
         roomId,
@@ -132,7 +152,7 @@ function renderVoteAvatars() {
         guessedSocketId: p.id
       });
       closeVoteModal();
-      msg.textContent = "Vote enregistré ✅";
+      if (msg) msg.textContent = "Vote enregistré ✅";
     });
 
     voteAvatarGrid.appendChild(card);
@@ -140,16 +160,20 @@ function renderVoteAvatars() {
 }
 
 function renderResults(results) {
+  if (!resultsList) return;
   resultsList.innerHTML = "";
 
-  results.forEach((r) => {
-    const ownerAvatar = AVATARS.find(a => a.id === r.ownerAvatarId);
+  (results || []).forEach((r) => {
+    const ownerAvatar = AVATARS.find((a) => a.id === r.ownerAvatarId);
 
-    const topVotes = (r.votes || []).slice(0, 3).map(v => {
-      const av = AVATARS.find(a => a.id === v.avatarId);
-      const label = av ? av.label : "??";
-      return `<span class="badge">${escapeHtml(label)} : ${v.count}</span>`;
-    }).join(" ");
+    const topVotes = (r.votes || [])
+      .slice(0, 3)
+      .map((v) => {
+        const av = AVATARS.find((a) => a.id === v.avatarId);
+        const label = av ? av.label : "??";
+        return `<span class="badge">${escapeHtml(label)} : ${v.count}</span>`;
+      })
+      .join(" ");
 
     const item = document.createElement("div");
     item.className = "result-item";
@@ -168,23 +192,29 @@ function renderResults(results) {
 }
 
 // ----------- Events UI -----------
-sendSecretBtn.addEventListener("click", () => {
-  msg.textContent = "";
-  socket.emit("secret:submit", { roomId, secretText: secretInput.value });
-});
+if (sendSecretBtn) {
+  sendSecretBtn.addEventListener("click", () => {
+    if (msg) msg.textContent = "";
+    socket.emit("secret:submit", { roomId, secretText: secretInput ? secretInput.value : "" });
+  });
+}
 
-goVoteBtn.addEventListener("click", () => {
-  msg.textContent = "";
-  socket.emit("phase:set", { roomId, phase: "vote" });
-});
+if (goVoteBtn) {
+  goVoteBtn.addEventListener("click", () => {
+    if (msg) msg.textContent = "";
+    socket.emit("phase:set", { roomId, phase: "vote" });
+  });
+}
 
-showResultsBtn.addEventListener("click", () => {
-  socket.emit("phase:set", { roomId, phase: "results" });
-  socket.emit("results:get", { roomId });
-});
+if (showResultsBtn) {
+  showResultsBtn.addEventListener("click", () => {
+    socket.emit("phase:set", { roomId, phase: "results" });
+    socket.emit("results:get", { roomId });
+  });
+}
 
-closeModalBtn.addEventListener("click", closeVoteModal);
-cancelVoteBtn.addEventListener("click", closeVoteModal);
+if (closeModalBtn) closeModalBtn.addEventListener("click", closeVoteModal);
+if (cancelVoteBtn) cancelVoteBtn.addEventListener("click", closeVoteModal);
 
 // ----------- Socket events -----------
 socket.on("connect", () => {
@@ -196,46 +226,53 @@ socket.on("connect", () => {
 });
 
 socket.on("room:joined", ({ roomName }) => {
-  roomTitle.textContent = roomName ? `Salle : ${roomName}` : "Salle";
+  if (roomTitle) roomTitle.textContent = roomName ? `Salle : ${roomName}` : `Salle : ${roomId}`;
 });
 
 socket.on("room:state", (s) => {
   state = s;
-  phaseText.textContent = `Phase : ${phaseLabel(state.phase)}`;
+
+  if (phaseText) phaseText.textContent = `Phase : ${phaseLabel(state.phase)}`;
 
   // retrouver mon avatar
-  const me = (state.players || []).find(p => p.id === socket.id);
+  const me = (state.players || []).find((p) => p.id === socket.id);
   myAvatarId = me?.avatarId || null;
 
   setPanelsByPhase(state.phase);
 
-  // afficher grille avatar (phase avatar)
+  // afficher grille avatar
   renderAvatarGrid(avatarGrid, state.takenAvatars || [], true, (avatarId) => {
-    msg.textContent = "";
+    if (msg) msg.textContent = "";
     socket.emit("avatar:pick", { roomId, avatarId });
   });
 
-  // afficher secrets quand disponibles
+  // afficher secrets
   renderSecrets(state.secrets || []);
 
-  // pendant vote : le modal doit se mettre à jour si ouvert
-  if (modal.classList.contains("open")) renderVoteAvatars();
+  // modal vote
+  if (modal && modal.classList.contains("open")) renderVoteAvatars();
+
+  // ✅ UX : bloque tant que pas d’avatar
+  const hasAvatar = !!myAvatarId;
+  if (sendSecretBtn) sendSecretBtn.disabled = !hasAvatar;
+  if (goVoteBtn) goVoteBtn.disabled = !hasAvatar;
+
+  if (!hasAvatar && msg) {
+    msg.textContent = "Choisis un avatar d'abord.";
+  } else if (hasAvatar && msg && msg.textContent === "Choisis un avatar d'abord.") {
+    msg.textContent = "";
+  }
 });
 
 socket.on("results:data", (results) => {
-  // passer en results si besoin
   if (state) {
     state.phase = "results";
     setPanelsByPhase("results");
-    phaseText.textContent = `Phase : ${phaseLabel("results")}`;
+    if (phaseText) phaseText.textContent = `Phase : ${phaseLabel("results")}`;
   }
   renderResults(results || []);
 });
 
 socket.on("error:msg", (t) => {
-  msg.textContent = t;
-});
-
-socket.on("vote:ok", () => {
-  // optionnel
+  if (msg) msg.textContent = t;
 });
